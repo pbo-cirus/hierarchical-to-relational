@@ -9,16 +9,6 @@
       "label": "Hierarchy Configuration",
       "properties": [
         {
-          "label": "Parent field",
-          "name": "parentField",
-          "widget-type": "input-field-selector"
-        },
-        {
-          "label": "Child field",
-          "name": "childField",
-          "widget-type": "input-field-selector"
-        },
-        {
           "label": "Parent -> Child relationships",
           "name": "parentChildMappingField",
           "widget-type": "keyvalue",

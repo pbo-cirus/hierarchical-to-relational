@@ -32,6 +32,7 @@ import org.apache.spark.api.java.JavaRDD;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -84,15 +85,25 @@ public class HierarchyToRelational extends SparkCompute<StructuredRecord, Struct
     }
     Schema outputSchema = config.generateOutputSchema(inputSchema);
     List<String> inputFields = context.getInputSchema().getFields().stream().map(Schema.Field::getName)
-      .collect(Collectors.toList());
+        .collect(Collectors.toList());
     List<String> outputFields = outputSchema.getFields().stream().map(Schema.Field::getName)
-      .collect(Collectors.toList());
-    String description = String.format("Flattened the dataset by using the input field '%s' as the parent " +
-                                         "field and '%s' as the child field. Generated the column '%s' to " +
-                                         "contain distance from parent nodes, '%s' to denote if a node is the root " +
-                                         "of the hierarchy and '%s' to denote if a node is a leaf in the " +
-                                         "hierarchy.", config.getParentField(), config.getChildField(),
-                                       config.getLevelField(), config.getTopField(), config.getBottomField());
+        .collect(Collectors.toList());
+
+    StringBuilder sb = new StringBuilder(256);
+    sb.append("(");
+    String separator = "";
+    for (Map.Entry<String, String> map : config.getParentChildMapping().entrySet()) {
+      sb.append(separator).append(map.getKey()).append(" as the parent field and ")
+          .append(map.getValue()).append(" as the child field");
+      separator = "; ";
+    }
+    sb.append(".)");
+    String description = String.format("Flattened the dataset by using the input field '%s'" +
+            " Generated the column '%s' to " +
+            "contain distance from parent nodes, '%s' to denote if a node is the root " +
+            "of the hierarchy and '%s' to denote if a node is a leaf in the " +
+            "hierarchy.", sb,
+        config.getLevelField(), config.getTopField(), config.getBottomField());
     FieldOperation operation = new FieldTransformOperation(PLUGIN_NAME, description, inputFields, outputFields);
     context.record(Collections.singletonList(operation));
   }
