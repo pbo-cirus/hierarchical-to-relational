@@ -60,7 +60,6 @@ public class HierarchyConfig extends PluginConfig {
   private static final int MAX_DEPTH_FIELD_DEFAULT_VALUE = 50;
 
   private static final String SIBLING_ORDER_FIELD = "siblingOrder";
-  private static final String SIBLING_ORDER_FIELD_DEFAULT_VALUE = "ASC";
 
   private static final String BROADCAST_JOIN_FIELD = "broadcastJoin";
   private static final Boolean BROADCAST_JOIN_FIELD_DEFAULT_VALUE = Boolean.FALSE;
@@ -140,10 +139,10 @@ public class HierarchyConfig extends PluginConfig {
   @Description("Fields used to build the path from the root.")
   private String pathFields;
 
-//  @Name(SIBLING_ORDER_FIELD)
-//  @Nullable
-//  @Description("Sorting order for siblings")
-//  private String siblingOrder;
+  @Name(SIBLING_ORDER_FIELD)
+  @Nullable
+  @Description("Sorting order for siblings")
+  private Boolean siblingOrder;
 
   @Name(BROADCAST_JOIN_FIELD)
   @Nullable
@@ -160,12 +159,14 @@ public class HierarchyConfig extends PluginConfig {
       return;
     }
     if (getParentChildMapping().isEmpty()) {
-      collector.addFailure("Need at least one parent->child mapping.", "Please provide valid parent->child mapping.")
+      collector.addFailure("Need at least one parent->child mapping.",
+          "Please provide valid parent->child mapping.")
           .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
     }
     for (Map.Entry<String, String> map : getParentChildMapping().entrySet()) {
       if (map.getKey().equalsIgnoreCase(map.getValue())) {
-        collector.addFailure("Parent field is same as child field.", "Parent field needs to be different from child field.")
+        collector.addFailure("Parent field is same as child field.",
+            "Parent field needs to be different from child field.")
             .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
       }
       if (Strings.isNullOrEmpty(map.getKey())) {
@@ -237,9 +238,9 @@ public class HierarchyConfig extends PluginConfig {
     return maxDepth == null ? MAX_DEPTH_FIELD_DEFAULT_VALUE : maxDepth;
   }
 
-//  public String getSiblingOrder() {
-//    return siblingOrder == null ? SIBLING_ORDER_FIELD_DEFAULT_VALUE : siblingOrder;
-//  }
+  public String getSiblingOrder() {
+    return siblingOrder == true ? "ASC" : "DESC";
+  }
 
   public boolean isBroadcastJoin() {
     return broadcastJoin == null ? BROADCAST_JOIN_FIELD_DEFAULT_VALUE : broadcastJoin.booleanValue();

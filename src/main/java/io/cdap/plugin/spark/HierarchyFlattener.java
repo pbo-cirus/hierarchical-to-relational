@@ -84,6 +84,7 @@ public class HierarchyFlattener {
 
   private final int maxLevel;
   private final Boolean broadcastJoin;
+  private final String siblingOrder;
 
   public HierarchyFlattener(HierarchyConfig config) {
     this.levelCol = config.getLevelField();
@@ -96,13 +97,13 @@ public class HierarchyFlattener {
     this.parentChildMapping = config.getParentChildMapping();
     this.pathFields = config.getPathFields();
     this.connectByRootFields = config.getConnectByRootFields();
+    this.siblingOrder = config.getSiblingOrder();
 
     if (SHOW_DEBUG_COLUMNS) {
       LOG.info("====================================");
       LOG.info("== pathFields before parsing: " + config.getRawPathFields() + " ==");
       LOG.info("====================================");
-    }
-    if (SHOW_DEBUG_COLUMNS) {
+
       LOG.info("======================================");
       LOG.info("== pathFields after parsing - Begin ==");
       LOG.info("======================================");
@@ -192,16 +193,18 @@ public class HierarchyFlattener {
         rdd.map((StructuredRecord record) -> DataFrames.toRow(record, sparkSchema)).rdd(),
         sparkSchema);
 
-    LOG.info("==============================");
-    LOG.info("== Content of input - BEGIN ==");
-    LOG.info("==============================");
-    for (Iterator<Row> it = input.javaRDD().toLocalIterator(); it.hasNext(); ) {
-      Row line = it.next();
-      LOG.info("== " + line);
+    if (SHOW_DEBUG_CONTENT) {
+      LOG.info("==============================");
+      LOG.info("== Content of input - BEGIN ==");
+      LOG.info("==============================");
+      for (Iterator<Row> it = input.javaRDD().toLocalIterator(); it.hasNext(); ) {
+        Row line = it.next();
+        LOG.info("== " + line);
+      }
+      LOG.info("============================");
+      LOG.info("== Content of input - END ==");
+      LOG.info("=============================");
     }
-    LOG.info("============================");
-    LOG.info("== Content of input - END ==");
-    LOG.info("=============================");
 
     // cache the input so that the previous stages don't get re-processed
     input = input.persist(StorageLevel.DISK_ONLY());
@@ -237,9 +240,11 @@ public class HierarchyFlattener {
          [parent:6, child:6, level:0, root:false, leaf:0, category:tomato]
      */
 
-    LOG.info("======================================");
-    LOG.info("== Starting computation for level 0 ==");
-    LOG.info("======================================");
+    if (SHOW_DEBUG_CONTENT) {
+      LOG.info("======================================");
+      LOG.info("== Starting computation for level 0 ==");
+      LOG.info("======================================");
+    }
     Dataset<Row> currentLevel = getStartingPoints(input, dataFieldNames);
     Dataset<Row> flattened = currentLevel;
 
@@ -301,10 +306,11 @@ public class HierarchyFlattener {
                 "Ensure there are no cycles in the hierarchy, or increase the max depth.", maxLevel));
       }
 
-      LOG.info("=======================================");
-      LOG.info("== Starting computation for level {} ==", level);
-      LOG.info("=======================================");
-
+      if (SHOW_DEBUG_CONTENT) {
+        LOG.info("=======================================");
+        LOG.info("== Starting computation for level {} ==", level);
+        LOG.info("=======================================");
+      }
       /*
          select
            current.parent as parent,
@@ -533,7 +539,6 @@ public class HierarchyFlattener {
           LOG.info("== Content of nextLevel - END   ==");
           LOG.info("==================================");
         }
-
       }
       flattened = flattened.union(nextLevel);
 
@@ -706,15 +711,40 @@ public class HierarchyFlattener {
       LOG.info("============================");
       LOG.info("== notParentWhere - Begin - Level {} ==", level);
       LOG.info("============================");
-      LOG.info("== " + notParentWhere.toString());
+      LOG.info("== " + notParentWhere);
       LOG.info("==========================");
       LOG.info("== notParentWhere - End ==");
       LOG.info("==========================");
     }
 
+    // Prepare the columns to sort on. x 2 to account for Parent and Child
+    Column[] orderByColumns = new Column[parentChildMapping.size() * 2];
+    i = 0;
+    for (Map.Entry<String, String> map : parentChildMapping.entrySet()) {
+      orderByColumns[i] = new Column(map.getKey()).asc_nulls_first();
+      if (siblingOrder.equalsIgnoreCase("ASC")) {
+        orderByColumns[2 + i++] = new Column(map.getValue()).asc_nulls_first();
+      } else {
+        orderByColumns[2 + i++] = new Column(map.getValue()).desc_nulls_first();
+      }
+    }
+
+//    if (SHOW_DEBUG_COLUMNS) {
+      LOG.info("============================");
+      LOG.info("== orderByColumns - Begin - Level {} ==", level);
+      LOG.info("============================");
+      for (Column column : orderByColumns) {
+        LOG.info("== " + column);
+      }
+      LOG.info("==========================");
+      LOG.info("== orderByColumns - End ==");
+      LOG.info("==========================");
+//    }
+
     flattened = flattened
         .where(notParentWhere)
-        .select(finalOutputColumns);
+        .select(finalOutputColumns)
+        .orderBy(orderByColumns);
 
     if (SHOW_DEBUG_COLUMNS) {
       LOG.info("================================");
@@ -1049,9 +1079,7 @@ public class HierarchyFlattener {
       LOG.info("================================");
       LOG.info("== broadCastJoinColumns - End ==");
       LOG.info("================================");
-    }
 
-    if (SHOW_DEBUG_COLUMNS) {
       LOG.info("===================================");
       LOG.info("== broadCastWhereColumns - Begin ==");
       LOG.info("===================================");
@@ -1098,8 +1126,7 @@ public class HierarchyFlattener {
       LOG.info("==========================");
       LOG.info("== joined content - END ==");
       LOG.info("==========================");
-    }
-    if (SHOW_DEBUG_CONTENT) {
+
       LOG.info("==============================");
       LOG.info("== parentRootValues - BEGIN ==");
       LOG.info("==============================");

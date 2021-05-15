@@ -80,6 +80,22 @@
           }
         },
         {
+          "label": "Sibling order",
+          "name": "siblingOrder",
+          "widget-type": "toggle",
+          "widget-attributes": {
+            "default": "true",
+            "on": {
+              "value": "true",
+              "label": "Ascending"
+            },
+            "off": {
+              "value": "false",
+              "label": "Descending"
+            }
+          }
+        },
+        {
           "label": "Path Fields",
           "name": "pathFields",
           "widget-type": "ds-multiplevalues",
@@ -100,14 +116,14 @@
           "name": "broadcastJoin",
           "widget-type": "toggle",
           "widget-attributes": {
-            "default": "false",
+            "default": "true",
             "on": {
               "value": "true",
-              "label": "True"
+              "label": "Yes"
             },
             "off": {
               "value": "false",
-              "label": "False"
+              "label": "No"
             }
           }
         }
