@@ -165,7 +165,7 @@ public class HierarchyConfig extends PluginConfig {
     }
     for (Map.Entry<String, String> map : getParentChildMapping().entrySet()) {
       if (map.getKey().equalsIgnoreCase(map.getValue())) {
-        collector.addFailure("Parent field is same as child field.", "Parent field needs to be different child field.")
+        collector.addFailure("Parent field is same as child field.", "Parent field needs to be different from child field.")
             .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
       }
       if (Strings.isNullOrEmpty(map.getKey())) {
@@ -304,7 +304,7 @@ public class HierarchyConfig extends PluginConfig {
   }
 
   /**
-   * Generate output schema including additional fields from plugin configuration
+   * Generates the output schema including additional fields from the plugin configuration
    *
    * @param inputSchema {@link Schema}
    */
