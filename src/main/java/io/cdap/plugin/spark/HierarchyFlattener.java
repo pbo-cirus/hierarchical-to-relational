@@ -31,6 +31,7 @@ import org.apache.spark.storage.StorageLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -71,6 +72,7 @@ public class HierarchyFlattener {
   private final Map<String, Object> parentRootValues = new HashMap<>();
   private final Map<String, Object> childRootValues = new HashMap<>();
   private final Map<String, String> parentChildMapping;
+  private final List<AbstractMap.SimpleImmutableEntry<String, String>> parentChildMappingAsList;
 
   private final List<Map<String, String>> pathFields;
   private final List<Map<String, String>> connectByRootFields;
@@ -95,6 +97,7 @@ public class HierarchyFlattener {
     this.maxLevel = config.getMaxDepth();
     this.broadcastJoin = config.isBroadcastJoin();
     this.parentChildMapping = config.getParentChildMapping();
+    this.parentChildMappingAsList = config.getParentChildMappingAsList();
     this.pathFields = config.getPathFields();
     this.connectByRootFields = config.getConnectByRootFields();
     this.siblingOrder = config.getSiblingOrder();
@@ -720,25 +723,25 @@ public class HierarchyFlattener {
     // Prepare the columns to sort on. x 2 to account for Parent and Child
     Column[] orderByColumns = new Column[parentChildMapping.size() * 2];
     i = 0;
-    for (Map.Entry<String, String> map : parentChildMapping.entrySet()) {
-      orderByColumns[i] = new Column(map.getKey()).asc_nulls_first();
+    for (AbstractMap.SimpleImmutableEntry<String, String> entry : parentChildMappingAsList) {
+      orderByColumns[i] = new Column(entry.getKey()).asc_nulls_first();
       if (siblingOrder.equalsIgnoreCase("ASC")) {
-        orderByColumns[2 + i++] = new Column(map.getValue()).asc_nulls_first();
+        orderByColumns[2 + i++] = new Column(entry.getValue()).asc_nulls_first();
       } else {
-        orderByColumns[2 + i++] = new Column(map.getValue()).desc_nulls_first();
+        orderByColumns[2 + i++] = new Column(entry.getValue()).desc_nulls_first();
       }
     }
 
 //    if (SHOW_DEBUG_COLUMNS) {
-      LOG.info("============================");
-      LOG.info("== orderByColumns - Begin - Level {} ==", level);
-      LOG.info("============================");
-      for (Column column : orderByColumns) {
-        LOG.info("== " + column);
-      }
-      LOG.info("==========================");
-      LOG.info("== orderByColumns - End ==");
-      LOG.info("==========================");
+    LOG.info("============================");
+    LOG.info("== orderByColumns - Begin - Level {} ==", level);
+    LOG.info("============================");
+    for (Column column : orderByColumns) {
+      LOG.info("== " + column);
+    }
+    LOG.info("==========================");
+    LOG.info("== orderByColumns - End ==");
+    LOG.info("==========================");
 //    }
 
     flattened = flattened

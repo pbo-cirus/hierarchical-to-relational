@@ -28,6 +28,7 @@ import io.cdap.plugin.common.KeyValueListParser;
 import org.mortbay.log.Log;
 
 import javax.annotation.Nullable;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -291,6 +292,8 @@ public class HierarchyConfig extends PluginConfig {
   }
 
   public Map<String, String> getParentChildMapping() {
+    List<AbstractMap.SimpleImmutableEntry<String, String>> parentChildList = new ArrayList<>();
+
     Map<String, String> parentChildMap = new HashMap<>();
     if (Strings.isNullOrEmpty(parentChildMappingField)) {
       return parentChildMap; // Empty
@@ -302,6 +305,23 @@ public class HierarchyConfig extends PluginConfig {
       parentChildMap.put(keyValuePair.getKey(), keyValuePair.getValue());
     }
     return parentChildMap;
+  }
+
+  public List<AbstractMap.SimpleImmutableEntry<String, String>> getParentChildMappingAsList() {
+    List<AbstractMap.SimpleImmutableEntry<String, String>> parentChildList = new ArrayList<>();
+    if (Strings.isNullOrEmpty(parentChildMappingField)) {
+      return parentChildList; // Empty
+    }
+
+    KeyValueListParser keyValueListParser = new KeyValueListParser(";", "=");
+    Iterable<KeyValue<String, String>> parsedParentChildMappingField
+        = keyValueListParser.parse(parentChildMappingField);
+    for (KeyValue<String, String> keyValuePair : parsedParentChildMappingField) {
+      AbstractMap.SimpleImmutableEntry<String, String> entry =
+          new AbstractMap.SimpleImmutableEntry<>(keyValuePair.getKey(), keyValuePair.getValue());
+      parentChildList.add(entry);
+    }
+    return parentChildList;
   }
 
   /**
