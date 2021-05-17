@@ -68,8 +68,9 @@ import static org.apache.spark.sql.functions.broadcast;
  */
 public class HierarchyFlattener {
   private static final Logger LOG = LoggerFactory.getLogger(HierarchyFlattener.class);
-  private static final boolean SHOW_DEBUG_CONTENT = true;
-  private static final boolean SHOW_DEBUG_COLUMNS = true;
+  private static final boolean SHOW_DEBUG_CONTENT = false;
+  private static final boolean SHOW_DEBUG_COLUMNS = false;
+  private static final boolean SHOW_DEBUG_INPUT = false;
 
   private final Map<String, Object> parentRootValues = new HashMap<>();
   private final Map<String, Object> childRootValues = new HashMap<>();
@@ -108,15 +109,17 @@ public class HierarchyFlattener {
     this.siblingOrder = config.getSiblingOrder();
     this.startWithConditions = config.getStartWithConditions();
 
-    LOG.info("=================================");
-    LOG.info("== startWithConditions - BEGIN ==");
-    LOG.info("=================================");
-    for (String condition : startWithConditions) {
-      LOG.info("== " + condition);
+    if (SHOW_DEBUG_INPUT) {
+      LOG.info("=================================");
+      LOG.info("== startWithConditions - BEGIN ==");
+      LOG.info("=================================");
+      for (String condition : startWithConditions) {
+        LOG.info("== " + condition);
+      }
+      LOG.info("===============================");
+      LOG.info("== startWithConditions - END ==");
+      LOG.info("===============================");
     }
-    LOG.info("===============================");
-    LOG.info("== startWithConditions - END ==");
-    LOG.info("===============================");
 
     if (SHOW_DEBUG_COLUMNS) {
       LOG.info("====================================");
@@ -365,9 +368,9 @@ public class HierarchyFlattener {
           accColumn = accColumn.and(new Column("input." + map.getValue()).isNull());
         }
       }
-      columns[i++] = functions.when(accColumn, 1).otherwise(0).as(botCol);
       columns[i++] = new Column(levelCol).plus(1).as(levelCol);
       columns[i++] = functions.lit(falseStr).as(topCol);
+      columns[i++] = functions.when(accColumn, 1).otherwise(0).as(botCol);
 
       for (String fieldName : dataFieldNames) {
         if (parentChildMapping.containsKey(fieldName)) {
@@ -741,29 +744,45 @@ public class HierarchyFlattener {
       LOG.info("==========================");
     }
 
-    // Prepare the columns to sort on. x 2 to account for Parent and Child
+    // Prepare the columns to sort on, x 2 to account for Parent and Child
     Column[] orderByColumns = new Column[parentChildMapping.size() * 2];
     i = 0;
     for (AbstractMap.SimpleImmutableEntry<String, String> entry : parentChildMappingAsList) {
-      orderByColumns[i] = new Column(entry.getKey()).asc_nulls_first();
+      orderByColumns[i++] = new Column(entry.getKey()).asc_nulls_first();
+    }
+
+    for (AbstractMap.SimpleImmutableEntry<String, String> entry : parentChildMappingAsList) {
       if (siblingOrder.equalsIgnoreCase("ASC")) {
-        orderByColumns[2 + i++] = new Column(entry.getValue()).asc_nulls_first();
+        orderByColumns[i++] = new Column(entry.getValue()).asc_nulls_first();
       } else {
-        orderByColumns[2 + i++] = new Column(entry.getValue()).desc_nulls_first();
+        orderByColumns[i++] = new Column(entry.getValue()).desc_nulls_first();
       }
     }
 
-//    if (SHOW_DEBUG_COLUMNS) {
-    LOG.info("============================");
-    LOG.info("== orderByColumns - Begin - Level {} ==", level);
-    LOG.info("============================");
-    for (Column column : orderByColumns) {
-      LOG.info("== " + column);
+    if (SHOW_DEBUG_COLUMNS) {
+      LOG.info("============================");
+      LOG.info("== orderByColumns - Begin - Level {} ==", level);
+      LOG.info("============================");
+      for (Column column : orderByColumns) {
+        LOG.info("== " + column);
+      }
+      LOG.info("==========================");
+      LOG.info("== orderByColumns - End ==");
+      LOG.info("==========================");
     }
-    LOG.info("==========================");
-    LOG.info("== orderByColumns - End ==");
-    LOG.info("==========================");
-//    }
+
+    if (SHOW_DEBUG_CONTENT) {
+      LOG.info("============================================================");
+      LOG.info("== Content of flattened before finalOutputColumns - BEGIN ==");
+      LOG.info("============================================================");
+      for (Iterator<Row> it = flattened.javaRDD().toLocalIterator(); it.hasNext(); ) {
+        Row line = it.next();
+        LOG.info("== " + line);
+      }
+      LOG.info("==========================================================");
+      LOG.info("== Content of flattened before finalOutputColumns - END ==");
+      LOG.info("==========================================================");
+    }
 
     flattened = flattened
         .where(notParentWhere)
@@ -794,6 +813,7 @@ public class HierarchyFlattener {
       LOG.info("== Content of flattened after finalOutputColumns - END ==");
       LOG.info("=========================================================");
     }
+
     return flattened.javaRDD().map(row -> DataFrames.fromRow(row, outputSchema));
   }
 
@@ -879,6 +899,20 @@ public class HierarchyFlattener {
       }
     }
 
+    /*
+     == DEPT AS `MGR_DEPT`
+     == DEPT AS `DEPT`
+     == EMPNO AS `MGR`
+     == EMPNO AS `EMPNO`
+     == 0 AS `Level`
+     == CASE WHEN ((MGR_DEPT IS NULL) AND (MGR IS NULL)) THEN true ELSE false END AS `Root`
+     == 0 AS `Leaf`
+     == ENAME
+     == Lvl
+     == ENAME AS `EnamePath`
+     == 0 AS `PathLength`
+     == ENAME AS `connect_by_root`
+     */
     columns[i++] = functions.lit(0).as(levelCol);
     columns[i++] = functions.when(isRoot, trueStr).otherwise(falseStr).as(topCol);
     columns[i++] = functions.lit(0).as(botCol);
@@ -1006,9 +1040,9 @@ public class HierarchyFlattener {
       columns[i++] = new Column("A." + map.getValue()).as(map.getValue());
     }
 
-    columns[i++] = functions.lit(0).as(botCol);
     columns[i++] = functions.lit(0).as(levelCol);
     columns[i++] = functions.lit(trueStr).as(topCol);
+    columns[i++] = functions.lit(0).as(botCol);
 
     Map<String, String> childParentMapping = new HashMap<>();
     for (Map.Entry<String, String> entry : parentChildMapping.entrySet()) {
@@ -1171,7 +1205,9 @@ public class HierarchyFlattener {
             .where(broadCastWhereColumns)
             .select(columns);
       } else {
-        joined = input.alias("A")
+        joined = input.alias("A").join(
+            children.alias("B"),
+            broadCastJoinColumns, "inner")
             .where(startWithColumn)
             .select(columns);
       }
@@ -1183,7 +1219,9 @@ public class HierarchyFlattener {
             .where(broadCastWhereColumns)
             .select(columns);
       } else {
-        joined = input.alias("A")
+        joined = input.alias("A").join(
+            children.alias("B"),
+            broadCastJoinColumns, "inner")
             .where(startWithColumn)
             .select(columns);
       }
