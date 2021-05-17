@@ -21,10 +21,17 @@
           }
         },
         {
-          "label": "Start with",
+          "label": "Start With",
           "name": "startWith",
-          "widget-type": "textbox",
-          "default": ""
+          "widget-type": "ds-multiplevalues",
+          "widget-attributes": {
+            "delimiter": ",",
+            "values-delimiter": "=",
+            "numValues": "1",
+            "placeholders": [
+              "Boolean expression"
+            ]
+          }
         }
       ]
     },

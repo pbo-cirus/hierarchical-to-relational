@@ -16,6 +16,7 @@
 
 package io.cdap.plugin.spark;
 
+import com.google.common.base.Strings;
 import io.cdap.cdap.api.data.format.StructuredRecord;
 import io.cdap.cdap.api.data.schema.Schema;
 import io.cdap.cdap.api.spark.sql.DataFrames;
@@ -36,6 +37,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.spark.sql.functions.broadcast;
@@ -66,8 +68,8 @@ import static org.apache.spark.sql.functions.broadcast;
  */
 public class HierarchyFlattener {
   private static final Logger LOG = LoggerFactory.getLogger(HierarchyFlattener.class);
-  private static final boolean SHOW_DEBUG_CONTENT = false;
-  private static final boolean SHOW_DEBUG_COLUMNS = false;
+  private static final boolean SHOW_DEBUG_CONTENT = true;
+  private static final boolean SHOW_DEBUG_COLUMNS = true;
 
   private final Map<String, Object> parentRootValues = new HashMap<>();
   private final Map<String, Object> childRootValues = new HashMap<>();
@@ -87,6 +89,9 @@ public class HierarchyFlattener {
   private final int maxLevel;
   private final Boolean broadcastJoin;
   private final String siblingOrder;
+  private final List<String> startWithConditions;
+  private Schema inputSchema;
+  private Column startWithColumn;
 
   public HierarchyFlattener(HierarchyConfig config) {
     this.levelCol = config.getLevelField();
@@ -101,6 +106,17 @@ public class HierarchyFlattener {
     this.pathFields = config.getPathFields();
     this.connectByRootFields = config.getConnectByRootFields();
     this.siblingOrder = config.getSiblingOrder();
+    this.startWithConditions = config.getStartWithConditions();
+
+    LOG.info("=================================");
+    LOG.info("== startWithConditions - BEGIN ==");
+    LOG.info("=================================");
+    for (String condition : startWithConditions) {
+      LOG.info("== " + condition);
+    }
+    LOG.info("===============================");
+    LOG.info("== startWithConditions - END ==");
+    LOG.info("===============================");
 
     if (SHOW_DEBUG_COLUMNS) {
       LOG.info("====================================");
@@ -108,7 +124,7 @@ public class HierarchyFlattener {
       LOG.info("====================================");
 
       LOG.info("======================================");
-      LOG.info("== pathFields after parsing - Begin ==");
+      LOG.info("== pathFields after parsing - BEGIN ==");
       LOG.info("======================================");
       for (Map<String, String> map : this.pathFields) {
         for (String k : map.keySet()) {
@@ -116,11 +132,11 @@ public class HierarchyFlattener {
         }
       }
       LOG.info("====================================");
-      LOG.info("== pathFields after parsing - End ==");
+      LOG.info("== pathFields after parsing - END ==");
       LOG.info("====================================");
 
       LOG.info("================================================");
-      LOG.info("=== connectByRootFields after parsing - Begin ==");
+      LOG.info("=== connectByRootFields after parsing - BEGIN ==");
       LOG.info("================================================");
       for (Map<String, String> map : this.connectByRootFields) {
         for (String k : map.keySet()) {
@@ -128,17 +144,17 @@ public class HierarchyFlattener {
         }
       }
       LOG.info("=============================================");
-      LOG.info("== connectByRootFields after parsing - End ==");
+      LOG.info("== connectByRootFields after parsing - END ==");
       LOG.info("=============================================");
 
       LOG.info("==============================================");
-      LOG.info("== parentChildMapping after parsing - Begin ==");
+      LOG.info("== parentChildMapping after parsing - BEGIN ==");
       LOG.info("==============================================");
       for (Map.Entry<String, String> mapping : parentChildMapping.entrySet()) {
         LOG.info("== " + mapping.getKey() + ":" + mapping.getValue());
       }
       LOG.info("============================================");
-      LOG.info("== parentChildMapping after parsing - End ==");
+      LOG.info("== parentChildMapping after parsing - END ==");
       LOG.info("============================================");
     }
   }
@@ -188,7 +204,7 @@ public class HierarchyFlattener {
    */
   public JavaRDD<StructuredRecord> flatten(SparkExecutionPluginContext context, JavaRDD<StructuredRecord> rdd,
                                            Schema outputSchema) {
-    Schema inputSchema = context.getInputSchema();
+    inputSchema = context.getInputSchema();
     SQLContext sqlContext = new SQLContext(context.getSparkContext());
     StructType sparkSchema = DataFrames.toDataType(inputSchema);
 
@@ -209,9 +225,9 @@ public class HierarchyFlattener {
       LOG.info("=============================");
     }
 
-    // cache the input so that the previous stages don't get re-processed
+    // Cache the input so that the previous stages don't get re-processed
     input = input.persist(StorageLevel.DISK_ONLY());
-    // field names without the parent and child fields.
+    // Field names without the parent and child fields.
     List<String> dataFieldNames = inputSchema.getFields().stream()
         .map(Schema.Field::getName)
         .filter(name -> isNotInParentChildMapping(parentChildMapping, name))
@@ -391,17 +407,17 @@ public class HierarchyFlattener {
       }
 
       if (SHOW_DEBUG_COLUMNS) {
-        LOG.info("====================================");
-        LOG.info("== currentLevel - Begin - Level {} ==", level);
-        LOG.info("====================================");
+        LOG.info("===========================================");
+        LOG.info("== currentLevel:columns - BEGIN - Level {} ==", level);
+        LOG.info("===========================================");
         for (Column col : columns) {
           if (col != null) {
             LOG.info("== " + col);
           }
         }
-        LOG.info("========================");
-        LOG.info("== currentLevel - End ==");
-        LOG.info("========================");
+        LOG.info("================================");
+        LOG.info("== currentLevel:columns - END ==");
+        LOG.info("================================");
       }
 
       Dataset<Row> nextLevel;
@@ -469,9 +485,9 @@ public class HierarchyFlattener {
         for (Column col : columns) {
           LOG.info("== " + col);
         }
-        LOG.info("===========================");
-        LOG.info("== selectd columns - END ==");
-        LOG.info("===========================");
+        LOG.info("============================");
+        LOG.info("== selected columns - END ==");
+        LOG.info("============================");
       }
 
       if (SHOW_DEBUG_CONTENT) {
@@ -662,7 +678,8 @@ public class HierarchyFlattener {
     }
 
     flattened = flattened.groupBy(groupByColumns)
-        .agg(functions.min(new Column(levelCol)).as(levelCol), selectFlattenedColumns);
+        .agg(functions.min(new Column(levelCol)).as(levelCol),
+            selectFlattenedColumns);
 
     if (SHOW_DEBUG_CONTENT) {
       LOG.info("==============================================");
@@ -708,6 +725,10 @@ public class HierarchyFlattener {
           }
         }
       }
+    }
+
+    if (notParentWhere != null) {
+      notParentWhere = notParentWhere.or(new Column(botCol).equalTo(trueStr)).or(new Column(topCol).equalTo(trueStr));
     }
 
     if (SHOW_DEBUG_COLUMNS) {
@@ -911,7 +932,19 @@ public class HierarchyFlattener {
       LOG.info("=============================");
     }
 
-    Dataset<Row> distinct = levelZero.union(input.select(columns)).distinct();
+    boolean parentIsNull = true;
+    for (Object p : parentRootValues.values()) {
+      if (p != null) {
+        parentIsNull = false;
+        break;
+      }
+    }
+    Dataset<Row> distinct;
+    if (startWithColumn != null && !parentIsNull) {
+      distinct = levelZero;
+    } else {
+      distinct = levelZero.union(input.select(columns)).distinct();
+    }
     if (SHOW_DEBUG_CONTENT) {
       LOG.info("=================================");
       LOG.info("== Content of distinct - BEGIN ==");
@@ -928,7 +961,7 @@ public class HierarchyFlattener {
   }
 
   /*
-    Get roots by looking for rows where they parent never rows up as a child in any other row.
+    Get roots by looking for rows where the parent never rows up as a child in any other row.
    */
   private Dataset<Row> getNonSelfReferencingRoots(Dataset<Row> input, List<String> dataFieldNames) {
     /*
@@ -961,7 +994,7 @@ public class HierarchyFlattener {
        Every other data field is just null.
     */
     // 2 * pathFields.size() to account for 2 extra columns for the path & path length
-    // 1 * connectByRootFields.size() to account for 1 extra column for the coonect_by_root
+    // 1 * connectByRootFields.size() to account for 1 extra column for the connect_by_root
     Column[] columns = new Column[2 * parentChildMapping.size()
         + 3
         + dataFieldNames.size()
@@ -973,9 +1006,9 @@ public class HierarchyFlattener {
       columns[i++] = new Column("A." + map.getValue()).as(map.getValue());
     }
 
+    columns[i++] = functions.lit(0).as(botCol);
     columns[i++] = functions.lit(0).as(levelCol);
     columns[i++] = functions.lit(trueStr).as(topCol);
-    columns[i++] = functions.lit(0).as(botCol);
 
     Map<String, String> childParentMapping = new HashMap<>();
     for (Map.Entry<String, String> entry : parentChildMapping.entrySet()) {
@@ -1057,6 +1090,30 @@ public class HierarchyFlattener {
       LOG.info("== Content of input - END ==");
       LOG.info("============================");
     }
+    if (SHOW_DEBUG_COLUMNS) {
+      LOG.info("===========================");
+      LOG.info("== selectColumns - BEGIN ==");
+      LOG.info("===========================");
+      for (Column column : selectColumns) {
+        LOG.info("==  " + column.toString());
+      }
+      LOG.info("=========================");
+      LOG.info("== selectColumns - END ==");
+      LOG.info("=========================");
+    }
+
+    if (SHOW_DEBUG_CONTENT) {
+      LOG.info("=================================");
+      LOG.info("== Content of children - BEGIN ==");
+      LOG.info("=================================");
+      for (Iterator<Row> it = children.javaRDD().toLocalIterator(); it.hasNext(); ) {
+        Row line = it.next();
+        LOG.info("== " + line);
+      }
+      LOG.info("===============================");
+      LOG.info("== Content of children - END ==");
+      LOG.info("===============================");
+    }
 
     Dataset<Row> joined;
     Column broadCastJoinColumns = null;
@@ -1072,40 +1129,64 @@ public class HierarchyFlattener {
       }
     }
 
+    startWithColumn = getStartWithColumn(inputSchema, "A");
+
     if (SHOW_DEBUG_COLUMNS) {
       LOG.info("==================================");
-      LOG.info("== broadCastJoinColumns - Begin ==");
+      LOG.info("== broadCastJoinColumns - BEGIN ==");
       LOG.info("==================================");
       if (broadCastJoinColumns != null) {
         LOG.info("==  " + broadCastJoinColumns);
       }
       LOG.info("================================");
-      LOG.info("== broadCastJoinColumns - End ==");
+      LOG.info("== broadCastJoinColumns - END ==");
       LOG.info("================================");
 
       LOG.info("===================================");
-      LOG.info("== broadCastWhereColumns - Begin ==");
+      LOG.info("== broadCastWhereColumns - BEGIN ==");
       LOG.info("===================================");
       if (broadCastWhereColumns != null) {
         LOG.info("==  " + broadCastWhereColumns);
       }
       LOG.info("=================================");
-      LOG.info("== broadCastWhereColumns - End ==");
+      LOG.info("== broadCastWhereColumns - END ==");
       LOG.info("=================================");
+
+      LOG.info("=============================");
+      LOG.info("== startWithColumn - BEGIN ==");
+      LOG.info("=============================");
+      if (startWithColumn != null) {
+        LOG.info("==  " + startWithColumn);
+      }
+      LOG.info("===========================");
+      LOG.info("== startWithColumn - END ==");
+      LOG.info("===========================");
     }
 
     if (broadcastJoin) {
-      joined = input.alias("A").join(
-          broadcast(children.alias("B")),
-          broadCastJoinColumns, "leftouter")
-          .where(broadCastWhereColumns)
-          .select(columns);
+      if (startWithColumn == null) {
+        joined = input.alias("A").join(
+            broadcast(children.alias("B")),
+            broadCastJoinColumns, "leftouter")
+            .where(broadCastWhereColumns)
+            .select(columns);
+      } else {
+        joined = input.alias("A")
+            .where(startWithColumn)
+            .select(columns);
+      }
     } else {
-      joined = input.alias("A").join(
-          children.alias("B"),
-          broadCastJoinColumns, "leftouter")
-          .where(broadCastWhereColumns)
-          .select(columns);
+      if (startWithColumn == null) {
+        joined = input.alias("A").join(
+            children.alias("B"),
+            broadCastJoinColumns, "leftouter")
+            .where(broadCastWhereColumns)
+            .select(columns);
+      } else {
+        joined = input.alias("A")
+            .where(startWithColumn)
+            .select(columns);
+      }
     }
 
     if (SHOW_DEBUG_CONTENT) {
@@ -1158,6 +1239,73 @@ public class HierarchyFlattener {
     // unfortunately there is no way to check if a dataset is empty without running a spark job
     // this, however, is much more performant than performing a count(), which would require a pass over all the data.
     return dataset.takeAsList(1).isEmpty();
+  }
+
+  /**
+   * Parse the start with condition to build a Column object that can be passed to the initialization stage
+   *
+   * @return Column object
+   */
+  public Column getStartWithColumn(Schema inputSchema, String setName) {
+    Column column = null;
+    List<String> conditions = startWithConditions;
+
+    // If there's nothing to process, return right away.
+    if (conditions.isEmpty() || inputSchema == null || inputSchema.getFields() == null || setName == null) {
+      return null;
+    }
+
+    // If it's not empty, add the dot
+    if (!setName.isEmpty()) {
+      setName += ".";
+    }
+
+    // Create a Set to look up the column names in the inpu schema
+    Set<String> columnNames = inputSchema.getFields()
+        .stream().map(f -> f.getName().toUpperCase()).collect(Collectors.toSet());
+    for (String condition : conditions) {
+      if (!Strings.isNullOrEmpty(condition)) {
+        String[] splits = condition.replace("=", " = ").trim().split("\\s++");
+        if (splits.length == 3) {
+          // The only recognized conditions are:
+          // <column_name> is null
+          // <column_name> = <value>
+          String columnName = splits[0].toUpperCase();
+          String operator = splits[1].toUpperCase();
+          String value = splits[2];
+
+          if (!columnNames.contains(columnName)) {
+            LOG.warn("'Start with' Condition " + condition + " was not used because the column " + columnName
+                + " was not found in the input schema");
+            continue;
+          }
+
+          if (operator.equals("=")) {
+            if (column == null) {
+              column = new Column(setName + columnName.toUpperCase()).equalTo(value);
+            } else {
+              column = column.and(new Column(setName + columnName.toUpperCase()).equalTo(value));
+            }
+          } else if ((operator.equals("IS") && value.equalsIgnoreCase("null"))) {
+            if (column == null) {
+              column = new Column(setName + columnName.toUpperCase()).isNull();
+            } else {
+              column = column.and(new Column(setName + columnName.toUpperCase()).isNull());
+            }
+          } else {
+            // Error, don't know what it is
+            LOG.warn("'Start with' Condition " + condition + " was not used because the operator " + operator
+                + " was not recognized.");
+          }
+        } else {
+          // Error, don't know what it is
+          LOG.warn("'Start with' Condition " + condition + " was not used because the result of splitting the string " +
+              "yielded more than 3 entries.");
+        }
+      }
+    }
+//    column = column.and(new Column("A.TEST").equalTo("ABCD"));
+    return column;
   }
 
 }

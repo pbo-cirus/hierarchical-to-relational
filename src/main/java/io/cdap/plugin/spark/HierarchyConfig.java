@@ -25,7 +25,8 @@ import io.cdap.cdap.api.dataset.lib.KeyValue;
 import io.cdap.cdap.api.plugin.PluginConfig;
 import io.cdap.cdap.etl.api.FailureCollector;
 import io.cdap.plugin.common.KeyValueListParser;
-import org.mortbay.log.Log;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.util.AbstractMap;
@@ -35,16 +36,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-
 /**
  * Config class for HierarchyToRelational.
  */
 public class HierarchyConfig extends PluginConfig {
+  private static final Logger LOG = LoggerFactory.getLogger(HierarchyConfig.class);
 
   // Hierarchy Configuration
   private static final String PARENT_CHILD_MAPPING_FIELD = "parentChildMappingField";
   private static final String START_WITH_FIELD = "startWith";
-  private static final String START_WITH_DEFAULT_VALUE = "";
 
   // Advanced
   private static final String LEVEL_FIELD = "levelField";
@@ -151,14 +151,15 @@ public class HierarchyConfig extends PluginConfig {
   private Boolean broadcastJoin;
 
   public boolean requiredFieldsContainMacro() {
-    return containsMacro(LEVEL_FIELD) ||
-        containsMacro(TOP_FIELD) || containsMacro(LEVEL_FIELD) || containsMacro(BOTTOM_FIELD);
+    return containsMacro(TOP_FIELD) || containsMacro(LEVEL_FIELD) || containsMacro(BOTTOM_FIELD);
   }
 
   public void validate(FailureCollector collector) {
     if (requiredFieldsContainMacro()) {
       return;
     }
+
+    // Parent -> child mapping
     if (getParentChildMapping().isEmpty()) {
       collector.addFailure("Need at least one parent->child mapping.",
           "Please provide valid parent->child mapping.")
@@ -193,10 +194,24 @@ public class HierarchyConfig extends PluginConfig {
 //      }
 //    }
 
+    // Maximum depth for the recursion
     if (maxDepth != null && maxDepth < 1) {
       collector.addFailure("Invalid max depth.", "Max depth must be at least 1.")
           .withConfigProperty(MAX_DEPTH_FIELD);
     }
+
+    // Start with conditions
+    String startWithError = getStartWithError();
+    if (!Strings.isNullOrEmpty(startWithError)) {
+      collector.addFailure("Invalid condition.", startWithError)
+          .withConfigProperty(START_WITH_FIELD);
+    }
+
+    // Fields defining the path
+//    if (Strings.isNullOrEmpty(getRawPathFields())) {
+//      collector.addFailure("Invalid max depth.", "Max depth must be at least 1.")
+//          .withConfigProperty(MAX_DEPTH_FIELD);
+//    }
     collector.getOrThrowException();
   }
 
@@ -240,7 +255,7 @@ public class HierarchyConfig extends PluginConfig {
   }
 
   public String getSiblingOrder() {
-    return siblingOrder == true ? "ASC" : "DESC";
+    return siblingOrder ? "ASC" : "DESC";
   }
 
   public boolean isBroadcastJoin() {
@@ -249,6 +264,10 @@ public class HierarchyConfig extends PluginConfig {
 
   public String getRawPathFields() {
     return pathFields;
+  }
+
+  public String getRawStartWith() {
+    return startWith;
   }
 
   public List<Map<String, String>> getPathFields() {
@@ -265,11 +284,53 @@ public class HierarchyConfig extends PluginConfig {
           map.put(PATH_FIELD_LENGTH_ALIAS, entries[3]);
           list.add(map);
         } else {
-          Log.warn("Cannot parse the path fields from: " + field);
+          LOG.warn("Cannot parse the path fields from: " + field);
         }
       }
     }
     return list;
+  }
+
+  public List<String> getStartWithConditions() {
+    List<String> list = new ArrayList<>();
+    if (!Strings.isNullOrEmpty(startWith)) {
+      String[] conditions = startWith.split(",");
+      for (String condition : conditions) {
+        list.add(condition);
+      }
+    }
+    return list;
+  }
+
+
+  public String getStartWithError() {
+    List<String> conditions = getStartWithConditions();
+    // If there is no condition passed in, the for loop will do nothing and we return OK
+    for (String condition : conditions) {
+      if (!Strings.isNullOrEmpty(condition)) {
+        String[] splits = condition.replace("=", " = ").trim().split("\\s++");
+        if (splits.length != 3) {
+          // Error, don't know what it is
+          return "Cannot parse " + condition;
+        } else {
+          // The only recognized conditions are:
+          // <column_name> is null
+          // <column_name> = <value>
+          // TODO: How to check that the column name exists in the input schema?
+          String columnName = splits[0].toUpperCase();
+          String operator = splits[1].toUpperCase();
+          String value = splits[2];
+
+          if (!operator.equals("=")) {
+            if ((!operator.equals("IS") || !value.equalsIgnoreCase("null"))) {
+              // Error, don't know what it is
+              return "Cannot parse " + condition;
+            }
+          }
+        }
+      }
+    }
+    return ""; // Everything ok, no error to report
   }
 
   public List<Map<String, String>> getConnectByRootFields() {
@@ -284,7 +345,7 @@ public class HierarchyConfig extends PluginConfig {
           map.put(CONNECT_BY_ROOT_ALIAS, entries[1]);
           list.add(map);
         } else {
-          Log.warn("Cannot parse the connectByRoot fields from: " + field);
+          LOG.warn("Cannot parse the connectByRoot fields from: " + field);
         }
       }
     }
