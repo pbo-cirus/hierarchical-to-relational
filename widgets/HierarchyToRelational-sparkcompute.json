@@ -25,7 +25,7 @@
           "name": "startWith",
           "widget-type": "ds-multiplevalues",
           "widget-attributes": {
-            "delimiter": ",",
+            "delimiter": ";",
             "values-delimiter": "=",
             "numValues": "1",
             "placeholders": [
@@ -107,7 +107,7 @@
           "name": "pathFields",
           "widget-type": "ds-multiplevalues",
           "widget-attributes": {
-            "delimiter": ",",
+            "delimiter": ";",
             "values-delimiter": "=",
             "numValues": "4",
             "placeholders": [

@@ -82,14 +82,16 @@ public class HierarchyConfig extends PluginConfig {
   private String parentChildMappingField;
 
   @Name(START_WITH_FIELD)
-  @Description("Expression defining where to start exploring the hierarchy from.")
+  @Description("Expression defining where to start exploring the hierarchy from. " +
+      "Valid constructs are <field_name> = <value> and <field_name> is null. If adding multiple boolean conditions, " +
+      "they will be concatenated with a logical 'AND'")
   @Macro
   @Nullable
   private String startWith;
 
   // Advanced section
   @Name(LEVEL_FIELD)
-  @Description("The name of the field that should contain the Yes level in the hierarchy starting at a particular " +
+  @Description("The name of the field that should contain the level in the hierarchy starting at a particular " +
       "node in the tree. The level is calculated as a distance of a node to a particular parent node in the tree.")
   @Macro
   @Nullable
@@ -130,7 +132,7 @@ public class HierarchyConfig extends PluginConfig {
   private Integer maxDepth;
 
   @Name(CONNECT_BY_ROOT_FIELD)
-  @Description("Connect by root.")
+  @Description("Field name to use for Connect by root.")
   @Macro
   @Nullable
   private String connectByRoot;
@@ -273,7 +275,7 @@ public class HierarchyConfig extends PluginConfig {
   public List<Map<String, String>> getPathFields() {
     List<Map<String, String>> list = new ArrayList<>();
     if (!Strings.isNullOrEmpty(pathFields)) {
-      String[] fields = pathFields.split(",");
+      String[] fields = pathFields.trim().split(";");
       for (String field : fields) {
         String[] entries = field.split("=");
         if (entries.length == 4) {
@@ -292,9 +294,10 @@ public class HierarchyConfig extends PluginConfig {
   }
 
   public List<String> getStartWithConditions() {
+    // empno=7839;dept=A
     List<String> list = new ArrayList<>();
     if (!Strings.isNullOrEmpty(startWith)) {
-      String[] conditions = startWith.split(",");
+      String[] conditions = startWith.trim().split(";");
       for (String condition : conditions) {
         list.add(condition);
       }
@@ -316,7 +319,6 @@ public class HierarchyConfig extends PluginConfig {
           // The only recognized conditions are:
           // <column_name> is null
           // <column_name> = <value>
-          // TODO: How to check that the column name exists in the input schema?
           String columnName = splits[0].toUpperCase();
           String operator = splits[1].toUpperCase();
           String value = splits[2];

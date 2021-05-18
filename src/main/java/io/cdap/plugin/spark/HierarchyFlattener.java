@@ -93,6 +93,8 @@ public class HierarchyFlattener {
   private final List<String> startWithConditions;
   private Schema inputSchema;
   private Column startWithColumn;
+  private boolean startWithColumnUsesEqual;
+  private boolean startWithColumnUsesIsNull;
 
   public HierarchyFlattener(HierarchyConfig config) {
     this.levelCol = config.getLevelField();
@@ -267,6 +269,7 @@ public class HierarchyFlattener {
       LOG.info("== Starting computation for level 0 ==");
       LOG.info("======================================");
     }
+
     Dataset<Row> currentLevel = getStartingPoints(input, dataFieldNames);
     Dataset<Row> flattened = currentLevel;
 
@@ -913,6 +916,7 @@ public class HierarchyFlattener {
      == 0 AS `PathLength`
      == ENAME AS `connect_by_root`
      */
+
     columns[i++] = functions.lit(0).as(levelCol);
     columns[i++] = functions.when(isRoot, trueStr).otherwise(falseStr).as(topCol);
     columns[i++] = functions.lit(0).as(botCol);
@@ -979,6 +983,7 @@ public class HierarchyFlattener {
     } else {
       distinct = levelZero.union(input.select(columns)).distinct();
     }
+
     if (SHOW_DEBUG_CONTENT) {
       LOG.info("=================================");
       LOG.info("== Content of distinct - BEGIN ==");
@@ -991,6 +996,7 @@ public class HierarchyFlattener {
       LOG.info("== Content of distinct - END   ==");
       LOG.info("=================================");
     }
+
     return distinct;
   }
 
@@ -1205,11 +1211,24 @@ public class HierarchyFlattener {
             .where(broadCastWhereColumns)
             .select(columns);
       } else {
-        joined = input.alias("A").join(
-            children.alias("B"),
-            broadCastJoinColumns, "inner")
-            .where(startWithColumn)
-            .select(columns);
+        if (startWithColumnUsesEqual && !startWithColumnUsesIsNull) {
+          joined = input.alias("A")
+              .where(startWithColumn)
+              .select(columns);
+        } else if (!startWithColumnUsesEqual && startWithColumnUsesIsNull) {
+          joined = input.alias("A").join(
+              broadcast(children.alias("B")),
+              broadCastJoinColumns, "leftouter")
+              .where(startWithColumn)
+              .select(columns);
+        } else {
+          // Don't know yet
+          joined = input.alias("A").join(
+              broadcast(children.alias("B")),
+              broadCastJoinColumns, "leftouter")
+              .where(startWithColumn)
+              .select(columns);
+        }
       }
     } else {
       if (startWithColumn == null) {
@@ -1219,11 +1238,24 @@ public class HierarchyFlattener {
             .where(broadCastWhereColumns)
             .select(columns);
       } else {
-        joined = input.alias("A").join(
-            children.alias("B"),
-            broadCastJoinColumns, "inner")
-            .where(startWithColumn)
-            .select(columns);
+        if (startWithColumnUsesEqual && !startWithColumnUsesIsNull) {
+          joined = input.alias("A")
+              .where(startWithColumn)
+              .select(columns);
+        } else if (!startWithColumnUsesEqual && startWithColumnUsesIsNull) {
+          joined = input.alias("A").join(
+              children.alias("B"),
+              broadCastJoinColumns, "leftouter")
+              .where(startWithColumn)
+              .select(columns);
+        } else {
+          // Don't know yet
+          joined = input.alias("A").join(
+              children.alias("B"),
+              broadCastJoinColumns, "leftouter")
+              .where(startWithColumn)
+              .select(columns);
+        }
       }
     }
 
@@ -1268,6 +1300,12 @@ public class HierarchyFlattener {
       LOG.info("===========================");
       LOG.info("== childRootValues - END ==");
       LOG.info("===========================");
+    }
+
+    // Check how many root nodes we found. There should be only one.
+    if (joined.takeAsList(2).size() > 1) {
+      throw new IllegalStateException(
+          String.format("Found more than one root node."));
     }
 
     return joined;
@@ -1319,12 +1357,14 @@ public class HierarchyFlattener {
           }
 
           if (operator.equals("=")) {
+            startWithColumnUsesEqual = true;
             if (column == null) {
               column = new Column(setName + columnName.toUpperCase()).equalTo(value);
             } else {
               column = column.and(new Column(setName + columnName.toUpperCase()).equalTo(value));
             }
           } else if ((operator.equals("IS") && value.equalsIgnoreCase("null"))) {
+            startWithColumnUsesIsNull = true;
             if (column == null) {
               column = new Column(setName + columnName.toUpperCase()).isNull();
             } else {
