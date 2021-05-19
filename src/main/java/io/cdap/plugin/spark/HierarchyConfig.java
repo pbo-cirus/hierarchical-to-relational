@@ -61,6 +61,7 @@ public class HierarchyConfig extends PluginConfig {
   private static final int MAX_DEPTH_FIELD_DEFAULT_VALUE = 50;
 
   private static final String SIBLING_ORDER_FIELD = "siblingOrder";
+  private static final Boolean SIBLING_ORDER_FIELD_DEFAULT_VALUE = true;
 
   private static final String BROADCAST_JOIN_FIELD = "broadcastJoin";
   private static final Boolean BROADCAST_JOIN_FIELD_DEFAULT_VALUE = Boolean.FALSE;
@@ -257,6 +258,9 @@ public class HierarchyConfig extends PluginConfig {
   }
 
   public String getSiblingOrder() {
+    if (siblingOrder == null) {
+      siblingOrder = SIBLING_ORDER_FIELD_DEFAULT_VALUE;
+    }
     return siblingOrder ? "ASC" : "DESC";
   }
 
@@ -309,24 +313,26 @@ public class HierarchyConfig extends PluginConfig {
   public String getStartWithError() {
     List<String> conditions = getStartWithConditions();
     // If there is no condition passed in, the for loop will do nothing and we return OK
-    for (String condition : conditions) {
-      if (!Strings.isNullOrEmpty(condition)) {
-        String[] splits = condition.replace("=", " = ").trim().split("\\s++");
-        if (splits.length != 3) {
-          // Error, don't know what it is
-          return "Cannot parse " + condition;
-        } else {
-          // The only recognized conditions are:
-          // <column_name> is null
-          // <column_name> = <value>
-          String columnName = splits[0].toUpperCase();
-          String operator = splits[1].toUpperCase();
-          String value = splits[2];
+    if (conditions != null) {
+      for (String condition : conditions) {
+        if (!Strings.isNullOrEmpty(condition)) {
+          String[] splits = condition.replace("=", " = ").trim().split("\\s++");
+          if (splits.length != 3) {
+            // Error, don't know what it is
+            return "Cannot parse " + condition;
+          } else {
+            // The only recognized conditions are:
+            // <column_name> is null
+            // <column_name> = <value>
+            String columnName = splits[0].toUpperCase();
+            String operator = splits[1].toUpperCase();
+            String value = splits[2];
 
-          if (!operator.equals("=")) {
-            if ((!operator.equals("IS") || !value.equalsIgnoreCase("null"))) {
-              // Error, don't know what it is
-              return "Cannot parse " + condition;
+            if (!operator.equals("=")) {
+              if ((!operator.equals("IS") || !value.equalsIgnoreCase("null"))) {
+                // Error, don't know what it is
+                return "Cannot parse " + condition;
+              }
             }
           }
         }
