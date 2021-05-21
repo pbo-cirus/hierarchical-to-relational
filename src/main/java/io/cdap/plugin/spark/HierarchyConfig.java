@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,6 +76,8 @@ public class HierarchyConfig extends PluginConfig {
   public static final String PATH_FIELD_LENGTH_ALIAS = "pathFieldLengthAlias";
   public static final String CONNECT_BY_ROOT_FIELD_NAME = "connectByRootFieldName";
   public static final String CONNECT_BY_ROOT_ALIAS = "connectByRootAlias";
+
+  private static Schema inputSchema;
 
   @Name(PARENT_CHILD_MAPPING_FIELD)
   @Description("Specifies parent child field mapping for fields that require swapping parent fields with tree/branch" +
@@ -140,21 +143,22 @@ public class HierarchyConfig extends PluginConfig {
 
   @Name(PATH_FIELDS_FIELD)
   @Nullable
+  @Macro
   @Description("Fields used to build the path from the root.")
   private String pathFields;
 
   @Name(SIBLING_ORDER_FIELD)
-  @Nullable
   @Description("Sorting order for siblings")
   private Boolean siblingOrder;
 
   @Name(BROADCAST_JOIN_FIELD)
-  @Nullable
   @Description("Performs an in-memory broadcast join")
   private Boolean broadcastJoin;
 
   public boolean requiredFieldsContainMacro() {
-    return containsMacro(TOP_FIELD) || containsMacro(LEVEL_FIELD) || containsMacro(BOTTOM_FIELD);
+    return containsMacro(TOP_FIELD) || containsMacro(LEVEL_FIELD) || containsMacro(BOTTOM_FIELD)
+        || containsMacro(FALSE_VALUE_FIELD) || containsMacro(TRUE_VALUE_FIELD)
+        || containsMacro(PARENT_CHILD_MAPPING_FIELD);
   }
 
   public void validate(FailureCollector collector) {
@@ -163,39 +167,54 @@ public class HierarchyConfig extends PluginConfig {
     }
 
     // Parent -> child mapping
-    if (getParentChildMapping().isEmpty()) {
+    if (!Strings.isNullOrEmpty(parentChildMappingField)) {
+      for (Map.Entry<String, String> map : getParentChildMapping().entrySet()) {
+        if (map.getKey().equalsIgnoreCase(map.getValue())) {
+          collector.addFailure("Parent field is same as child field.",
+              "Parent field needs to be different from child field.")
+              .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
+        }
+        if (Strings.isNullOrEmpty(map.getKey())) {
+          collector.addFailure("Parent field is null/empty.", "Please provide a valid parent field.")
+              .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
+        }
+        if (Strings.isNullOrEmpty(map.getValue())) {
+          collector.addFailure("Child field is null/empty.", "Please provide a valid child field.")
+              .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
+        }
+        // Check if the names of the parent and child can be found in the input schema
+        if (inputSchema != null) {
+          String parentName = map.getKey();
+          String childName = map.getValue();
+          boolean parentNameFoundInSchema = false;
+          boolean childNameFoundInSchema = false;
+          if (inputSchema.getFields() != null) {
+            for (Schema.Field field : inputSchema.getFields()) {
+              if (field.getName().equals(parentName)) {
+                parentNameFoundInSchema = true;
+              }
+              if (field.getName().equals(childName)) {
+                childNameFoundInSchema = true;
+              }
+            }
+          }
+          if (!parentNameFoundInSchema) {
+            collector.addFailure("Could not find the parent name " + parentName + " in the input schema.",
+                "Please provide a valid parent field name in the input schema (case sensitive)")
+                .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
+          }
+          if (!childNameFoundInSchema) {
+            collector.addFailure("Could not find the child name " + childName + " in the input schema.",
+                "Please provide a valid child field name in the input schema (case sensitive)")
+                .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
+          }
+        }
+      }
+    } else {
       collector.addFailure("Need at least one parent->child mapping.",
-          "Please provide valid parent->child mapping.")
+          "Please provide a valid parent->child mapping.")
           .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
     }
-    for (Map.Entry<String, String> map : getParentChildMapping().entrySet()) {
-      if (map.getKey().equalsIgnoreCase(map.getValue())) {
-        collector.addFailure("Parent field is same as child field.",
-            "Parent field needs to be different from child field.")
-            .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
-      }
-      if (Strings.isNullOrEmpty(map.getKey())) {
-        collector.addFailure("Parent field is null/empty.", "Please provide valid parent field.")
-            .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
-      }
-      if (Strings.isNullOrEmpty(map.getValue())) {
-        collector.addFailure("Child field is null/empty.", "Please provide valid child field.")
-            .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
-      }
-    }
-//    if (!Strings.isNullOrEmpty(PARENT_CHILD_MAPPING_FIELD)) {
-//      Map<String, String> parentChildMapping = getParentChildMapping();
-//      if (parentChildMapping.containsKey(parentField) || parentChildMapping.containsValue(parentField)) {
-//        collector.addFailure("Parent key field found mapping.",
-//            "Parent key field cannot be part of parent-> child mapping.")
-//            .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
-//      }
-//      if (parentChildMapping.containsKey(childField) || parentChildMapping.containsValue(childField)) {
-//        collector.addFailure("Child key field found mapping.",
-//            "Child key field cannot be part of parent-> child mapping.")
-//            .withConfigProperty(PARENT_CHILD_MAPPING_FIELD);
-//      }
-//    }
 
     // Maximum depth for the recursion
     if (maxDepth != null && maxDepth < 1) {
@@ -210,11 +229,57 @@ public class HierarchyConfig extends PluginConfig {
           .withConfigProperty(START_WITH_FIELD);
     }
 
-    // Fields defining the path
-//    if (Strings.isNullOrEmpty(getRawPathFields())) {
-//      collector.addFailure("Invalid max depth.", "Max depth must be at least 1.")
-//          .withConfigProperty(MAX_DEPTH_FIELD);
-//    }
+    // Connect by root
+    if (!Strings.isNullOrEmpty(connectByRoot)) {
+      List<Map<String, String>> connectByRootFields = getConnectByRootFields();
+      boolean found = false;
+      for (Map<String, String> field : connectByRootFields) {
+        String fieldName = field.get(CONNECT_BY_ROOT_FIELD_NAME);
+        if (inputSchema.getFields() != null) {
+          for (Schema.Field inputField : inputSchema.getFields()) {
+            if (inputField.getName().equals(fieldName)) {
+              found = true;
+              break;
+            }
+          }
+
+          if (!found) {
+            collector.addFailure("Cannot find the field " + fieldName + " in the input schema.",
+                "Please provide a valid field name in the input schema (case sensitive)")
+                .withConfigProperty(CONNECT_BY_ROOT_FIELD);
+          }
+        }
+      }
+    }
+
+    // Path fields
+    if (!Strings.isNullOrEmpty(pathFields)) {
+      List<Map<String, String>> paths = getPathFields();
+      boolean found = false;
+      // If the size is 0, this means the parsing failed
+      if (paths.size() == 0) {
+        collector.addFailure("Cannot parse the information.",
+            "Make sure all fields are correct.")
+            .withConfigProperty(PATH_FIELDS_FIELD);
+      }
+      for (Map<String, String> path : paths) {
+        String fieldName = path.get(VERTEX_FIELD_NAME);
+        if (inputSchema.getFields() != null) {
+          for (Schema.Field inputField : inputSchema.getFields()) {
+            if (inputField.getName().equals(fieldName)) {
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            collector.addFailure("Cannot find the field " + fieldName + " in the input schema.",
+                "Please provide a valid field name in the input schema (case sensitive)")
+                .withConfigProperty(PATH_FIELDS_FIELD);
+          }
+        }
+      }
+    }
+
     collector.getOrThrowException();
   }
 
@@ -268,14 +333,6 @@ public class HierarchyConfig extends PluginConfig {
     return broadcastJoin == null ? BROADCAST_JOIN_FIELD_DEFAULT_VALUE : broadcastJoin.booleanValue();
   }
 
-  public String getRawPathFields() {
-    return pathFields;
-  }
-
-  public String getRawStartWith() {
-    return startWith;
-  }
-
   public List<Map<String, String>> getPathFields() {
     List<Map<String, String>> list = new ArrayList<>();
     if (!Strings.isNullOrEmpty(pathFields)) {
@@ -298,13 +355,10 @@ public class HierarchyConfig extends PluginConfig {
   }
 
   public List<String> getStartWithConditions() {
-    // empno=7839;dept=A
     List<String> list = new ArrayList<>();
     if (!Strings.isNullOrEmpty(startWith)) {
       String[] conditions = startWith.trim().split(";");
-      for (String condition : conditions) {
-        list.add(condition);
-      }
+      Collections.addAll(list, conditions);
     }
     return list;
   }
@@ -324,9 +378,21 @@ public class HierarchyConfig extends PluginConfig {
             // The only recognized conditions are:
             // <column_name> is null
             // <column_name> = <value>
-            String columnName = splits[0].toUpperCase();
-            String operator = splits[1].toUpperCase();
+            String columnName = splits[0];
+            String operator = splits[1];
             String value = splits[2];
+            if (inputSchema.getFields() != null) {
+              boolean columnNameFoundInSchema = false;
+              for (Schema.Field field : inputSchema.getFields()) {
+                if (field.getName().equals(columnName)) {
+                  columnNameFoundInSchema = true;
+                  break;
+                }
+              }
+              if (!columnNameFoundInSchema) {
+                return "Cannot find " + columnName + " in the input schema (case sensitive)";
+              }
+            }
 
             if (!operator.equals("=")) {
               if ((!operator.equals("IS") || !value.equalsIgnoreCase("null"))) {
@@ -361,8 +427,6 @@ public class HierarchyConfig extends PluginConfig {
   }
 
   public Map<String, String> getParentChildMapping() {
-    List<AbstractMap.SimpleImmutableEntry<String, String>> parentChildList = new ArrayList<>();
-
     Map<String, String> parentChildMap = new HashMap<>();
     if (Strings.isNullOrEmpty(parentChildMappingField)) {
       return parentChildMap; // Empty
@@ -421,18 +485,17 @@ public class HierarchyConfig extends PluginConfig {
     // Add a potential PATH field
     List<Map<String, String>> paths = getPathFields();
     for (Map<String, String> path : paths) {
-      fields.add(Schema.Field.of(path.get(PATH_FIELD_ALIAS), Schema.nullableOf(Schema.of(Schema.Type.STRING))));
-      fields.add(Schema.Field.of(path.get(PATH_FIELD_LENGTH_ALIAS), Schema.nullableOf(Schema.of(Schema.Type.INT))));
+      fields.add(Schema.Field.of(path.get(PATH_FIELD_ALIAS), Schema.of(Schema.Type.STRING)));
+      fields.add(Schema.Field.of(path.get(PATH_FIELD_LENGTH_ALIAS), Schema.of(Schema.Type.INT)));
     }
 
     // Add a potential CONNECT_BY_ROOT field
     List<Map<String, String>> connectByRootFields = getConnectByRootFields();
     for (Map<String, String> field : connectByRootFields) {
-      fields.add(Schema.Field.of(field.get(CONNECT_BY_ROOT_ALIAS), Schema.nullableOf(Schema.of(Schema.Type.STRING))));
+      fields.add(Schema.Field.of(field.get(CONNECT_BY_ROOT_ALIAS), Schema.of(Schema.Type.STRING)));
     }
 
-    Schema schema = Schema.recordOf(inputSchema.getRecordName() + "_flattened", fields);
-    return schema;
+    return Schema.recordOf(inputSchema.getRecordName() + "_flattened", fields);
   }
 
   /**
@@ -451,4 +514,7 @@ public class HierarchyConfig extends PluginConfig {
         .collect(Collectors.toList());
   }
 
+  public void setInputSchema(Schema inputSchema) {
+    HierarchyConfig.inputSchema = inputSchema;
+  }
 }

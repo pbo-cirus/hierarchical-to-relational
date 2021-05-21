@@ -47,6 +47,7 @@ public class HierarchyToRelational extends SparkCompute<StructuredRecord, Struct
   public static final String PLUGIN_NAME = "HierarchyToRelational";
 
   private final HierarchyConfig config;
+  private Schema inputSchema = null;
   private Schema outputSchema = null;
 
   public HierarchyToRelational(HierarchyConfig config) {
@@ -58,18 +59,22 @@ public class HierarchyToRelational extends SparkCompute<StructuredRecord, Struct
     StageConfigurer stageConfigurer = pipelineConfigurer.getStageConfigurer();
     Schema outputSchema = config.generateOutputSchema(pipelineConfigurer.getStageConfigurer().getInputSchema());
     stageConfigurer.setOutputSchema(outputSchema);
+    inputSchema = pipelineConfigurer.getStageConfigurer().getInputSchema();
+    config.setInputSchema(inputSchema);
     config.validate(stageConfigurer.getFailureCollector());
   }
 
   @Override
   public void prepareRun(SparkPluginContext context) {
+    inputSchema = context.getInputSchema();
+    config.setInputSchema(inputSchema);
     config.validate(context.getFailureCollector());
     recordLineage(context);
   }
 
   @Override
   public void initialize(SparkExecutionPluginContext context) {
-    Schema inputSchema = context.getInputSchema();
+    inputSchema = context.getInputSchema();
     outputSchema = config.generateOutputSchema(inputSchema);
   }
 
